@@ -4,3 +4,5 @@ project(lab6 C)
 set(CMAKE_C_STANDARD 11)
 
 add_executable(lab6 main.c lab6.h lab6.c)
+
+target_link_libraries(lab6 pthread)

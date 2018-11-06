@@ -1,4 +1,3 @@
-#include "lab6.h"
 #include <stdio.h>
 #include <limits.h>
 #include <stdlib.h>
@@ -9,6 +8,7 @@
 #include <pthread.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include "lab6.h"
 
 const char *stralloc(const char *str) {
     if (str == NULL) {
@@ -56,13 +56,30 @@ void free_process_func_args(const struct process_func_args *args) {
     free((void *) args);
 }
 
+DIR *open_directory(const char *dirpath) {
+    while (1) {
+        DIR *dir = opendir(dirpath);
+        if (dir == NULL) {
+            if (errno == EMFILE) { // no available file descriptors
+                unsigned int sleep_remaining = SLEEP_TIME;
+                do {
+                    sleep_remaining = sleep(sleep_remaining);
+                } while (sleep_remaining > 0);
+            } else {
+                perror("opendir");
+                return NULL;
+            }
+        } else {
+            return dir;
+        }
+    }
+}
+
 int process_dir(const char *src_dir_path, const char *dest_dir_path) {
-    // TODO think about EMFILE
-    DIR *src_dir = opendir(src_dir_path);
+    DIR *src_dir = open_directory(src_dir_path);
     if (src_dir == NULL) {
-        perror("opendir");
-        // TODO replace exit to pthread_exit?????
-        exit(EXIT_FAILURE);
+        perror("open_directory");
+        return -1;
     }
 
     int ret;
@@ -87,26 +104,39 @@ int process_dir(const char *src_dir_path, const char *dest_dir_path) {
 
     struct dirent *entry = readdir(src_dir);
     while (entry != NULL) {
-        char full_file_path_src[strlen(src_dir_path) + strlen(entry->d_name) + 1];
+        printf("aaa\n");
+
+        char full_file_path_src[strlen(src_dir_path) + strlen(entry->d_name) + 2];
         memcpy(full_file_path_src, src_dir_path, strlen(src_dir_path) + 1);
+        strncat(full_file_path_src, "/", 1);
         strncat(full_file_path_src, entry->d_name, strlen(entry->d_name));
 
         struct stat stat_buffer;
-        stat(full_file_path_src, &stat_buffer);
+        ret = stat(full_file_path_src, &stat_buffer);
+        if (ret == -1) {
+            perror("stat");
+            return -1;
+        }
 
-        switch (stat_buffer.st_mode) {
+        // TODO refactor!!!
+        switch (stat_buffer.st_mode & S_IFMT) {
             case S_IFREG:
             case S_IFDIR: {
-                char full_file_path_dest[strlen(dest_dir_path) + strlen(entry->d_name) + 1];
+                if (stat_buffer.st_mode == S_IFDIR && (
+                        strcmp(entry->d_name, ".") == 0  || strcmp(entry->d_name, "..") == 0)) {
+                    continue;
+                }
+
+                char full_file_path_dest[strlen(dest_dir_path) + strlen(entry->d_name) + 2];
                 memcpy(full_file_path_dest, dest_dir_path, strlen(dest_dir_path) + 1);
+                strncat(full_file_path_dest, "/", 1);
                 strncat(full_file_path_dest, entry->d_name, strlen(entry->d_name));
 
                 const struct process_func_args *argzz = init_process_func_args(full_file_path_src, full_file_path_dest);
 
                 if (stat_buffer.st_mode == S_IFDIR) {
                     ret = pthread_create(&threads[count], NULL, wrapped_process_dir, (void *) argzz);
-                }
-                else if (stat_buffer.st_mode == S_IFREG) {
+                } else if (stat_buffer.st_mode == S_IFREG) {
                     ret = pthread_create(&threads[count], NULL, wrapped_process_file, (void *) argzz);
                 }
 
@@ -145,7 +175,7 @@ int process_dir(const char *src_dir_path, const char *dest_dir_path) {
 
     for (int i = 0; i < count; ++i) {
         ret = pthread_join(threads[i], NULL);
-        if (ret != 0 ) {
+        if (ret != 0) {
             perror("pthread_join");
             return -1;
         }
@@ -224,7 +254,7 @@ int process_file(const char *src_file_path, const char *dest_file_path) {
     int src_fd = open_file(src_file_path, O_RDONLY);
     if (src_fd == -1) {
         perror("open_file");
-        return  -1;
+        return -1;
     }
 
     int dest_fd = open_file(dest_file_path, O_WRONLY | O_CREAT | O_EXCL);
@@ -237,7 +267,7 @@ int process_file(const char *src_file_path, const char *dest_file_path) {
     ret = copy_file(src_fd, dest_fd);
     if (ret == -1) {
         perror("copy_file");
-        return  -1;
+        return -1;
     }
 
     ret = close(dest_fd);

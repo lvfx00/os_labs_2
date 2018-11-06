@@ -1,12 +1,8 @@
 #include <stdio.h>
-#include <limits.h>
 #include <stdlib.h>
 #include <memory.h>
-#include <dirent.h>
-#include <sys/stat.h>
-#include <errno.h>
-#include <pthread.h>
 
+#include "lab6.h"
 
 // returns 0 if specified path is valid absolute pathname
 // returns 1 if specified path isn't valid absolute pathname
@@ -44,16 +40,19 @@ int main(int argc, char **argv) {
         exit(EXIT_FAILURE);
     }
 
-    ret = validate_pathname(argv[2]);
-    if (ret == 1) {
-        fprintf(stderr, "You must specify canonicalized absolute pathname for destination");
-        exit(EXIT_FAILURE);
-    }
+//    ret = validate_pathname(argv[2]);
+//    if (ret == 1) {
+//        fprintf(stderr, "You must specify canonicalized absolute pathname for destination");
+//        exit(EXIT_FAILURE);
+//    }
+//    if (ret == -1) {
+//        perror("validate_path");
+//        exit(EXIT_FAILURE);
+//    }
+
+    ret = process_dir(argv[1], argv[2]);
     if (ret == -1) {
-        perror("validate_path");
+        perror("process_dir");
         exit(EXIT_FAILURE);
     }
-
-
-
 }

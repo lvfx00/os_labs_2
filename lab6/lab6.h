@@ -1,3 +1,5 @@
+#include <dirent.h>
+
 #ifndef LAB6_LAB6_H
 #define LAB6_LAB6_H
 
@@ -23,6 +25,8 @@ int process_dir(const char *src_dir_path, const char *dest_dir_path);
 int process_file(const char *src_file_path, const char *dest_file_path);
 
 int open_file(const char *filepath, int oflag);
+
+DIR *open_directory(const char *dirpath);
 
 int copy_file(int src_fd, int dest_fd);
 
