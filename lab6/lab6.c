@@ -10,6 +10,12 @@
 #include <unistd.h>
 #include "lab6.h"
 
+int process_dir_inner(pthread_t **threads, size_t *threads_size, size_t *threads_num,
+                      const char *src_path, const char *dest_path);
+
+int process_file_inner(pthread_t **threads, size_t *threads_size, size_t *threads_num,
+                       const char *src_path, const char *dest_path);
+
 const char *stralloc(const char *str) {
     if (str == NULL) {
         errno = EINVAL;
@@ -82,6 +88,7 @@ int process_dir(const char *src_dir_path, const char *dest_dir_path) {
         return -1;
     }
 
+    // TODO what if dir exists ??
     int ret;
     ret = mkdir(dest_dir_path, S_IRWXU | S_IRWXG | S_IROTH);
     if (ret == -1) {
@@ -90,26 +97,33 @@ int process_dir(const char *src_dir_path, const char *dest_dir_path) {
     }
 
     // to store threads
-    size_t count = 0;
-    size_t size = INIT_PTHREAD_T_ARR_SIZE;
-    pthread_t *threads = malloc(INIT_PTHREAD_T_ARR_SIZE * sizeof(pthread_t));
+    size_t threads_num = 0;
+    size_t threads_size = INIT_PTHREAD_T_ARR_SIZE;
+    pthread_t *threads = calloc(INIT_PTHREAD_T_ARR_SIZE, sizeof(pthread_t));
     if (threads == NULL) {
-        perror("malloc");
+        perror("calloc");
         return -1;
     }
 
-    int prev_errno = errno;
     // set errno to zero to distinguish errors from end of file stream
+    int prev_errno = errno;
     errno = 0;
 
-    struct dirent *entry = readdir(src_dir);
-    while (entry != NULL) {
-        printf("aaa\n");
+    for (struct dirent *entry = readdir(src_dir); entry != NULL; entry = readdir(src_dir)) {
+        if (strcmp(entry->d_name, ".") == 0  || strcmp(entry->d_name, "..") == 0) {
+            continue;
+        }
 
+        // TODO add marco ???
         char full_file_path_src[strlen(src_dir_path) + strlen(entry->d_name) + 2];
         memcpy(full_file_path_src, src_dir_path, strlen(src_dir_path) + 1);
         strncat(full_file_path_src, "/", 1);
         strncat(full_file_path_src, entry->d_name, strlen(entry->d_name));
+
+        char full_file_path_dest[strlen(dest_dir_path) + strlen(entry->d_name) + 2];
+        memcpy(full_file_path_dest, dest_dir_path, strlen(dest_dir_path) + 1);
+        strncat(full_file_path_dest, "/", 1);
+        strncat(full_file_path_dest, entry->d_name, strlen(entry->d_name));
 
         struct stat stat_buffer;
         ret = stat(full_file_path_src, &stat_buffer);
@@ -118,52 +132,32 @@ int process_dir(const char *src_dir_path, const char *dest_dir_path) {
             return -1;
         }
 
-        // TODO refactor!!!
         switch (stat_buffer.st_mode & S_IFMT) {
-            case S_IFREG:
-            case S_IFDIR: {
-                if (stat_buffer.st_mode == S_IFDIR && (
-                        strcmp(entry->d_name, ".") == 0  || strcmp(entry->d_name, "..") == 0)) {
-                    continue;
-                }
-
-                char full_file_path_dest[strlen(dest_dir_path) + strlen(entry->d_name) + 2];
-                memcpy(full_file_path_dest, dest_dir_path, strlen(dest_dir_path) + 1);
-                strncat(full_file_path_dest, "/", 1);
-                strncat(full_file_path_dest, entry->d_name, strlen(entry->d_name));
-
-                const struct process_func_args *argzz = init_process_func_args(full_file_path_src, full_file_path_dest);
-
-                if (stat_buffer.st_mode == S_IFDIR) {
-                    ret = pthread_create(&threads[count], NULL, wrapped_process_dir, (void *) argzz);
-                } else if (stat_buffer.st_mode == S_IFREG) {
-                    ret = pthread_create(&threads[count], NULL, wrapped_process_file, (void *) argzz);
-                }
-
-                if (ret != 0) {
-                    perror("pthread_create");
+            case S_IFDIR:
+                ret = process_dir_inner(&threads, &threads_size, &threads_num, full_file_path_src, full_file_path_dest);
+                if (ret == -1) {
+                    perror("process_dir_inner");
                     return -1;
                 }
-                count++;
-                if (count == size) {
-                    threads = realloc(threads, size * INC_FACTOR);
-                    if (threads == NULL) {
-                        perror("realloc");
-                        return -1;
-                    }
+                break;
+            case S_IFREG:
+                ret = process_file_inner(&threads, &threads_size, &threads_num, full_file_path_src, full_file_path_dest);
+                if (ret == -1) {
+                    perror("process_file_inner");
+                    return -1;
                 }
                 break;
-            }
             default:
+                // skip entry
                 break;
         }
-
-        entry = readdir(src_dir);
     }
     if (errno != 0) {
         perror("readdir");
         return -1;
     }
+
+    errno = prev_errno;
 
     ret = closedir(src_dir);
     if (ret == -1) {
@@ -171,9 +165,7 @@ int process_dir(const char *src_dir_path, const char *dest_dir_path) {
         return -1;
     }
 
-    errno = prev_errno;
-
-    for (int i = 0; i < count; ++i) {
+    for (int i = 0; i < threads_num; ++i) {
         ret = pthread_join(threads[i], NULL);
         if (ret != 0) {
             perror("pthread_join");
@@ -196,9 +188,9 @@ void *wrapped_process_dir(void *arg) {
     pthread_exit(NULL);
 }
 
-int open_file(const char *filepath, int oflag) {
+int open_file(const char *filepath, int oflag, int mode) {
     while (1) {
-        int fd = open(filepath, oflag);
+        int fd = open(filepath, oflag, mode);
         if (fd == -1) {
             if (errno == EMFILE) { // no available file descriptors
                 unsigned int sleep_remaining = SLEEP_TIME;
@@ -251,13 +243,13 @@ int copy_file(int src_fd, int dest_fd) {
 }
 
 int process_file(const char *src_file_path, const char *dest_file_path) {
-    int src_fd = open_file(src_file_path, O_RDONLY);
+    int src_fd = open_file(src_file_path, O_RDONLY, 0);
     if (src_fd == -1) {
         perror("open_file");
         return -1;
     }
 
-    int dest_fd = open_file(dest_file_path, O_WRONLY | O_CREAT | O_EXCL);
+    int dest_fd = open_file(dest_file_path, O_RDWR | O_CREAT | O_EXCL, S_IRWXU | S_IRWXG | S_IROTH);
     if (dest_fd == -1) {
         perror("open_file");
         return -1;
@@ -299,3 +291,52 @@ void *wrapped_process_file(void *arg) {
     free_process_func_args(args);
     pthread_exit(NULL);
 }
+
+int process_dir_inner(pthread_t **threads, size_t *threads_size, size_t *threads_num,
+        const char *src_path, const char *dest_path) {
+
+    const struct process_func_args *args = init_process_func_args(src_path, dest_path);
+
+    if (*threads_num == *threads_size) {
+        *threads_size *= INC_FACTOR;
+        *threads = realloc(*threads, *threads_size);
+        if (*threads == NULL) {
+            perror("realloc");
+            return -1;
+        }
+    }
+
+    int ret = pthread_create(threads[*threads_num], NULL, wrapped_process_dir, (void *) args);
+    if (ret != 0) {
+        perror("pthread_create");
+        return -1;
+    }
+    (*threads_num)++;
+
+    return 0;
+}
+
+int process_file_inner(pthread_t **threads, size_t *threads_size, size_t *threads_num,
+    const char *src_path, const char *dest_path) {
+
+    const struct process_func_args *args = init_process_func_args(src_path, dest_path);
+
+    if (*threads_num == *threads_size) {
+        *threads_size *= INC_FACTOR;
+        *threads = realloc(*threads, *threads_size);
+        if (*threads == NULL) {
+            perror("realloc");
+            return -1;
+        }
+    }
+
+    int ret = pthread_create(&(*threads)[*threads_num], NULL, wrapped_process_file, (void *) args);
+    if (ret != 0) {
+        perror("pthread_create");
+        return -1;
+    }
+    (*threads_num)++;
+
+    return 0;
+}
+

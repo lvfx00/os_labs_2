@@ -24,7 +24,7 @@ int process_dir(const char *src_dir_path, const char *dest_dir_path);
 
 int process_file(const char *src_file_path, const char *dest_file_path);
 
-int open_file(const char *filepath, int oflag);
+int open_file(const char *filepath, int oflag, int mode);
 
 DIR *open_directory(const char *dirpath);
 
